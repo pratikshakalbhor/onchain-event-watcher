@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { StateManager } from "./state.js";
 import { RpcClient } from "./rpc.js";
 import { id, Interface, Log } from "ethers";
-import { TRANSFER_TOPIC, parseTransferLog, formatTransferAlert } from "./events.js";
+import { TRANSFER_TOPIC, parseTransferLog, formatTransferAlert, formatUsdcAmount } from "./events.js";
 import type { ParsedTransfer } from "./events.js";
 import fs from "fs";
 import path from "path";
@@ -249,11 +249,17 @@ test("Parse transfer log correctly (zero amount)", () => {
   assert.strictEqual(parsed!.blockNumber, 23000001);
 });
 
+test("Format USDC Amount (1 USDC, 1.25 USDC, 0 USDC)", () => {
+  assert.strictEqual(formatUsdcAmount("1000000"), "1 USDC", "1000000 raw amount should format as 1 USDC");
+  assert.strictEqual(formatUsdcAmount("1250000"), "1.25 USDC", "1250000 raw amount should format as 1.25 USDC");
+  assert.strictEqual(formatUsdcAmount("0"), "0 USDC", "0 raw amount should format as 0 USDC");
+});
+
 test("Format transfer alert", () => {
   const transfer: ParsedTransfer = {
     from: "0x1111111111111111111111111111111111111111",
     to: "0x2222222222222222222222222222222222222222",
-    value: "1000000",
+    value: "1250000",
     transactionHash: "0xabc123",
     logIndex: 2,
     blockNumber: 23000000,
@@ -266,7 +272,8 @@ test("Format transfer alert", () => {
   assert.ok(alert.includes("Log Index: 2"));
   assert.ok(alert.includes("From: 0x1111111111111111111111111111111111111111"));
   assert.ok(alert.includes("To: 0x2222222222222222222222222222222222222222"));
-  assert.ok(alert.includes("Raw Amount: 1000000"));
+  assert.ok(alert.includes("Raw Amount: 1250000"));
+  assert.ok(alert.includes("Amount: 1.25 USDC"));
   assert.ok(alert.includes("Event ID: 0xabc123:2"));
 });
 

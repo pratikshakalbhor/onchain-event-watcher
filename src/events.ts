@@ -46,6 +46,24 @@ export function parseTransferLog(log: Log): ParsedTransfer | null {
   }
 }
 
+export function formatUsdcAmount(value: string | bigint): string {
+  const bigVal = BigInt(value);
+  if (bigVal === 0n) {
+    return "0 USDC";
+  }
+  const decimals = 6n;
+  const scale = 10n ** decimals;
+  const integerPart = bigVal / scale;
+  const remainder = bigVal % scale;
+
+  if (remainder === 0n) {
+    return `${integerPart} USDC`;
+  }
+
+  const fracStr = remainder.toString().padStart(6, "0").replace(/0+$/, "");
+  return `${integerPart}.${fracStr} USDC`;
+}
+
 export function formatTransferAlert(transfer: ParsedTransfer): string {
   return [
     "\n🔔 NEW USDC TRANSFER",
@@ -55,6 +73,8 @@ export function formatTransferAlert(transfer: ParsedTransfer): string {
     `From: ${transfer.from}`,
     `To: ${transfer.to}`,
     `Raw Amount: ${transfer.value}`,
+    `Amount: ${formatUsdcAmount(transfer.value)}`,
     `Event ID: ${transfer.transactionHash}:${transfer.logIndex}\n`,
   ].join("\n");
 }
+
