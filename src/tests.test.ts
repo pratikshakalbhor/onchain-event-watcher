@@ -187,7 +187,7 @@ test("Requirements 7: RPC throws on single block too large", async () => {
   }
 });
 
-test("Parse transfer log correctly", () => {
+test("Parse transfer log correctly (non-zero amount)", () => {
   // Create a mock log that matches Transfer event
   // value = 1000000 * 10^6 = 1000000000000 = 0xE8D4A51000 (USDC has 6 decimals)
   // Data must be 32 bytes (64 hex chars after 0x)
@@ -217,6 +217,36 @@ test("Parse transfer log correctly", () => {
   assert.strictEqual(parsed!.transactionHash, "0xabc123");
   assert.strictEqual(parsed!.logIndex, 2);
   assert.strictEqual(parsed!.blockNumber, 23000000);
+});
+
+test("Parse transfer log correctly (zero amount)", () => {
+  // Zero-value transfer (valid edge case)
+  const mockLog = {
+    transactionHash: "0xabc123",
+    index: 3,
+    blockNumber: 23000001,
+    topics: [
+      TRANSFER_TOPIC,
+      "0x0000000000000000000000001111111111111111111111111111111111111111", // from
+      "0x0000000000000000000000002222222222222222222222222222222222222222", // to
+    ],
+    data: "0x0000000000000000000000000000000000000000000000000000000000000000", // 0
+    address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    removed: false,
+    blockHash: "0x2",
+    transactionIndex: 0,
+    logIndex: 3,
+    toJSON: () => ({}),
+  } as unknown as Log;
+
+  const parsed = parseTransferLog(mockLog);
+  assert.ok(parsed !== null, "Should parse zero-value transfer log");
+  assert.strictEqual(parsed!.from, "0x1111111111111111111111111111111111111111");
+  assert.strictEqual(parsed!.to, "0x2222222222222222222222222222222222222222");
+  assert.strictEqual(parsed!.value, "0", "Raw value should be 0 for zero-value transfer");
+  assert.strictEqual(parsed!.transactionHash, "0xabc123");
+  assert.strictEqual(parsed!.logIndex, 3);
+  assert.strictEqual(parsed!.blockNumber, 23000001);
 });
 
 test("Format transfer alert", () => {
