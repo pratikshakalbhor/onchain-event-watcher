@@ -36,6 +36,21 @@ This implementation explicitly fulfills all eight requirements of the challenge:
 * Recursive large-range splitting
 * No committed credentials
 
+## ✅ Verification
+
+### Test Suite
+
+20 automated tests pass successfully.
+
+![All tests passing](screenshots/tests-pass.png)
+
+### Live Ethereum Watcher
+
+The watcher runs against Ethereum Mainnet and monitors USDC Transfer events using the event signature topic0, confirmation depth, persistent checkpoints, and RPC range splitting.
+
+![Live watcher](screenshots/watcher-running.png)
+
+
 ## 🚀 Setup & Execution
 
 ### 1. Requirements
