@@ -1,4 +1,4 @@
-import { JsonRpcProvider, Log, Block, Filter } from "ethers";
+import { JsonRpcProvider, Log, Block } from "ethers";
 
 export class RpcClient {
   public provider: JsonRpcProvider;
@@ -21,72 +21,82 @@ export class RpcClient {
     address: string,
     topics: (string | null)[]
   ): Promise<Log[]> {
-    return this.fetchLogsWithRetry(fromBlock, toBlock, address, topics, 0);
+    return this.fetchLogsIterative(fromBlock, toBlock, address, topics);
   }
 
-  private async fetchLogsWithRetry(
+  /**
+   * Iterative range splitting to avoid recursion depth limits.
+   * Uses a work queue to process ranges, splitting on "range too large" errors.
+   */
+  private async fetchLogsIterative(
     fromBlock: number,
     toBlock: number,
     address: string,
-    topics: (string | null)[],
-    depth: number
+    topics: (string | null)[]
   ): Promise<Log[]> {
-    if (depth > 20) {
-      throw new Error(`Maximum recursion depth exceeded for range ${fromBlock} → ${toBlock}`);
-    }
+    // Queue of ranges to process: { fromBlock, toBlock }
+    const queue: Array<{ fromBlock: number; toBlock: number }> = [
+      { fromBlock, toBlock },
+    ];
+    const results: Log[] = [];
 
-    const filter: Filter = {
-      fromBlock,
-      toBlock,
-      address,
-      topics,
-    };
+    while (queue.length > 0) {
+      const range = queue.shift()!;
+      const { fromBlock: f, toBlock: t } = range;
 
-    try {
-      return await this.provider.getLogs(filter);
-    } catch (err: any) {
-      const errMsg = (err.message || err.toString() || "").toLowerCase();
-      const ethError = err.error && err.error.message ? err.error.message.toLowerCase() : "";
+      const filter = {
+        fromBlock: f,
+        toBlock: t,
+        address,
+        topics,
+      };
 
-      const isRangeTooLarge =
-        errMsg.includes("range") ||
-        errMsg.includes("limit") ||
-        errMsg.includes("too large") ||
-        errMsg.includes("10k") ||
-        errMsg.includes("response size") ||
-        ethError.includes("too large") ||
-        ethError.includes("limit") ||
-        ethError.includes("range");
+      try {
+        const logs = await this.provider.getLogs(filter);
+        results.push(...logs);
+      } catch (err: any) {
+        const errMsg = (err.message || err.toString() || "").toLowerCase();
+        const ethError = err.error && err.error.message ? err.error.message.toLowerCase() : "";
 
-      if (isRangeTooLarge) {
-        if (fromBlock === toBlock) {
-          throw new Error(
-            `Cannot split single block ${fromBlock}. RPC error: ${err.message}`
+        const isRangeTooLarge =
+          errMsg.includes("range") ||
+          errMsg.includes("limit") ||
+          errMsg.includes("too large") ||
+          errMsg.includes("10k") ||
+          errMsg.includes("response size") ||
+          ethError.includes("too large") ||
+          ethError.includes("limit") ||
+          ethError.includes("range");
+
+        if (isRangeTooLarge) {
+          if (f === t) {
+            throw new Error(
+              `Cannot split single block ${f}. RPC error: ${err.message}`
+            );
+          }
+          console.log(
+            `⚠️ RPC range too large\nSplitting range ${f} → ${t} ...`
           );
+
+          // Split at midpoint and push both halves to queue (left first for order)
+          const midpoint = Math.floor((f + t) / 2);
+          // Push right first, then left, so left is processed first (queue is FIFO)
+          queue.unshift({ fromBlock: midpoint + 1, toBlock: t });
+          queue.unshift({ fromBlock: f, toBlock: midpoint });
+        } else {
+          throw err;
         }
-        console.log(
-          `⚠️ RPC range too large\nSplitting range ${fromBlock} → ${toBlock} ...`
-        );
-
-        const midpoint = Math.floor((fromBlock + toBlock) / 2);
-        const leftLogs = await this.fetchLogsWithRetry(
-          fromBlock,
-          midpoint,
-          address,
-          topics,
-          depth + 1
-        );
-        const rightLogs = await this.fetchLogsWithRetry(
-          midpoint + 1,
-          toBlock,
-          address,
-          topics,
-          depth + 1
-        );
-
-        return [...leftLogs, ...rightLogs];
       }
-      throw err;
     }
+
+    // Sort results by block number then log index to maintain canonical order
+    results.sort((a, b) => {
+      if (a.blockNumber !== b.blockNumber) {
+        return a.blockNumber - b.blockNumber;
+      }
+      return a.index - b.index;
+    });
+
+    return results;
   }
 }

@@ -71,9 +71,10 @@ export class Watcher {
     const safeHead = currentHead - this.confirmations;
     let lastProcessed = this.state.checkpoint.lastProcessedBlock ?? 0;
 
-    // If this is the first run and we have no checkpoint, start from safeHead - 1
-    // (so next poll starts at safeHead)
-    if (lastProcessed === 0 && this.state.checkpoint.lastProcessedBlock === 0) {
+    // StateManager already handles START_BLOCK correctly (only if no checkpoint exists).
+    // If checkpoint is 0 (fresh start with no START_BLOCK), start from safeHead - 1
+    // so the first poll processes up to safeHead.
+    if (lastProcessed === 0) {
       lastProcessed = Math.max(0, safeHead - 1);
       this.state.checkpoint.lastProcessedBlock = lastProcessed;
       this.state.save();
@@ -119,12 +120,10 @@ export class Watcher {
     if (reorgDetected) {
       if (rollbackBlock === -1) {
         // All checked blocks mismatched - rollback to before the oldest checked block
-        rollbackBlock = Math.max(
-          0,
-          recentBlockNums.length > 0
-            ? recentBlockNums[recentBlockNums.length - 1] - 1
-            : lastProcessed - 100
-        );
+        const oldestChecked = recentBlockNums.length > 0
+          ? (recentBlockNums[recentBlockNums.length - 1] as number)
+          : lastProcessed - 100;
+        rollbackBlock = Math.max(0, oldestChecked - 1);
       }
       console.warn(
         `\n⚠️ REORG DETECTED\nRolling checkpoint back to block ${rollbackBlock}`

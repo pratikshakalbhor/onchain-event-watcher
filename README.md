@@ -2,15 +2,39 @@
 
 A reliable, reorg-safe CLI watcher designed for the "Road To Devcon - I Ethereum build challenge", Problem 3: *The Alert That Fired Twice (Or Never)*. 
 
-It monitors Ethereum Mainnet specifically listening to the USDC token `Transfer` events while avoiding missed, duplicated, or invalid alerts.
+It monitors Ethereum Mainnet specifically listening to the USDC token `Transfer` events while handling node constraints, avoiding duplicates, and elegantly tracking chain progression.
 
-## 🏗️ Architecture
+## 🏗️ Architecture & Workflow
 
-- **`src/events.ts`**: Holds parsing logic, contract addresses, and constructs the safe `topic0` filter using `ethers.id()`.
-- **`src/rpc.ts`**: An RPC client wrapper that safely fetches logs and recursively chunks limits when `eth_getLogs` refuses queries that are too large.
-- **`src/state.ts`**: Manages the persistence of `lastProcessedBlock`, hashes for reorg handling, and the seen-event mapping to avoid alert duplicates.
-- **`src/watcher.ts`**: The core event loop that computes safe bounds from confirmations, detects reorgs using stored block hashes, triggers logs fetches, dedupes events, and prints alerts.
-- **`src/index.ts`**: The CLI entrypoint validating configs handling iterations and graceful shutdowns.
+```text
+Current chain head
+       ↓
+Confirmation buffer
+       ↓
+Safe block range
+       ↓
+eth_getLogs with topic0
+       ↓
+Parse matching events
+       ↓
+Deduplicate using txHash:logIndex
+       ↓
+Persist checkpoint
+       ↓
+Next polling cycle
+```
+
+## ✅ Challenge Requirements
+
+This implementation explicitly fulfills all eight requirements of the challenge:
+* Event signature hashed into `topic0`
+* Persistent last-processed block
+* Real chain-head based polling
+* Gap-free block progression
+* Confirmation/reorg safety
+* Persistent event deduplication
+* Recursive large-range splitting
+* No committed credentials
 
 ## 🚀 Setup & Execution
 
@@ -23,20 +47,17 @@ npm install
 ```
 
 ### 3. Environment Variables
-Copy `.env.example` to `.env` and fill it in:
-```bash
-cp .env.example .env
-```
-Inside `.env`, provide:
+Copy `.env.example` to `.env` and fill it in. 
+
+*Note: The snippet below simply contains example placeholders. Do NOT insert your real API key into `.env.example` or the README.*
+
 ```env
 ALCHEMY_API_KEY=your_alchemy_api_key_here
 RPC_URL=https://eth-mainnet.g.alchemy.com/v2/your_alchemy_api_key_here
 CONFIRMATIONS=6
 POLL_INTERVAL_MS=15000
-# Optional:
 START_BLOCK=20500000
 ```
-*(No real API keys are committed to Git as `.env` is `.gitignore`d.)*
 
 ### 4. Running the Watcher
 To run the watcher continuously:
@@ -45,25 +66,36 @@ npm start
 ```
 
 ### 5. Running Tests
-Tests are executed using `node:test`:
+Tests are executed natively using `node:test`:
 ```bash
 npm test
 ```
 
-## 🧠 Core Challenge Mechanisms
+## 🧠 How it works
 
-### Checkpoint Persistence (Requirement #2, #4)
-Instead of keeping the state merely in memory, this watcher natively persists its block heights in `data/checkpoint.json` using atomic disk writes. If you kill the server mid-processing, the next run reliably spins up immediately from exactly `lastProcessedBlock + 1`, keeping the process gap-free without overlapped processing.
+* **`eth_blockNumber`**: Polled dynamically every cycle to assess the absolute real Ethereum chain head.
+* **Confirmation Depth**: A stable configurable buffer subtracted natively from the chain head (`safeHead = currentHead - CONFIRMATIONS`). The watcher ignores the active unconfirmed tip.
+* **`eth_getLogs`**: The targeted RPC mechanism utilized for efficient filtering rather than pulling manual bulk block data.
+* **Event signature/topic0**: The `Transfer(address,address,uint256)` string represents the raw event signature. It is hashed natively via Keccak-256 to serve exactly as the `topic0` lookup filter natively.
+* **Checkpoint Persistence**: Saves the absolute integer representing the `lastProcessedBlock` dynamically utilizing atomic disk mechanisms toward `data/checkpoint.json`. Ensures successive boots resume without gaps.
+* **Duplicate Detection**: It assigns deterministic tracking using `${log.transactionHash}:${log.index}` mapping. This strictly prevents duplicate alerts during reprocessing, retries, and restarts by persistently tracking event identifiers securely.
+* **Reorg Handling**: Continuously records small caches of canonical block hashes. During subsequent queries, checks backwards ensuring recorded hashes still align equivalently with the source chain. Initiates graceful rollbacks accurately if un-alignment/reorg is detected.
+* **Range Splitting**: To avoid timeout crashes elegantly, the RPC recursively splits rejected block ranges into smaller sub-ranges until the RPC accepts them, while preserving complete block coverage flawlessly.
 
-### Safe Confirmations Depth (Requirement #3)
-We never look up the immediate HEAD. The safe bound is deduced explicitly via: `safeHead = currentHead - CONFIRMATIONS`. This delays polling safely avoiding unconfirmed transaction volatility.
+## 🔐 Security
 
-### Reorg Safety Strategy (Requirement #5)
-When iterating blocks, we actively cache the most recently requested block hashes in `checkpoint.json`. On subsequent polls, the watcher actively verifies those previously-canonical hashes against the chain's current state. If a mismatch is detected (meaning a reorg displaced previously processed transactions), the application gracefully calculates the divergence block, rolls the checkpoint backward, and reprocesses the corrected timeline.
+* API credentials are automatically securely loaded iteratively from environment variables natively.
+* `.env` is comprehensively ignored securely by Git (`.gitignore`).
+* `.env.example` behaves simply containing non-operational placeholders only.
+* No private keys are tracked, constructed nor used programmatically anywhere.
+* The watcher performs entirely as a read-only instance cleanly and does not strictly interact, sign, nor submit blockchain transactions anywhere.
 
-### Event Duplication Prevention (Requirement #6)
-Each log parses into a strict `txHash:logIndex` composite identifier. These IDs are stored persistently inside `data/seen-events.json`. Even through manual reprobing, complex restarts, or triggered reorg rollbacks, the watcher will definitively and silently drop duplicate matching fingerprints, guaranteeing users receive strictly *one* alert per absolute event.
+## ⚙️ Startup Behavior (Checkpoint / START_BLOCK Precedence)
 
-### Handling Large RPC Ranges (Requirement #7)
-Ethereum nodes (`eth_getLogs`) frequently reject gigantic ranges, e.g., >10K logs or processing-heavy searches. Our RPC engine catches `range too large`, `log response size exceeded`, and limits error variants specifically. Before crashing, it dynamically bisects `[fromBlock, toBlock]` recursively, querying the left boundary and right boundary in isolated segments, automatically conquering unlimited block timelines cleanly.
+The watcher determines its starting block using this precedence:
 
+1. **Existing production checkpoint** (`data/checkpoint.json`) — If a valid checkpoint exists, the watcher resumes from `lastProcessedBlock + 1`. This is the normal restart behavior.
+2. **`START_BLOCK` environment variable** — If no checkpoint exists but `START_BLOCK` is set, the watcher begins at `START_BLOCK - 1` so the first poll processes up to the safe head.
+3. **Safe default** — If neither exists, the watcher starts at `safeHead - 1` (current chain head minus confirmations) to avoid scanning from genesis.
+
+> **Important**: Unit tests use isolated temporary state files (`test-checkpoint.json`, `test-seen-events.json`) and **never** write to the production `data/checkpoint.json` or `data/seen-events.json`. Running `npm test` will not pollute your production checkpoint.

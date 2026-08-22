@@ -9,24 +9,35 @@ export interface Checkpoint {
   recentBlocks: { [blockNumber: number]: string };
 }
 
+export interface StateManagerOptions {
+  startBlock?: number | undefined;
+  checkpointPath?: string | undefined;
+  seenEventsPath?: string | undefined;
+}
+
 export class StateManager {
   checkpoint: Checkpoint = { lastProcessedBlock: 0, recentBlocks: {} };
   seenEvents: Set<string> = new Set();
+  private checkpointPath: string;
+  private seenEventsPath: string;
 
-  constructor(startBlock?: number) {
-    const dataDir = path.join(process.cwd(), "data");
+  constructor(options: StateManagerOptions = {}) {
+    this.checkpointPath = options.checkpointPath || CHECKPOINT_PATH;
+    this.seenEventsPath = options.seenEventsPath || SEEN_EVENTS_PATH;
+    
+    const dataDir = path.dirname(this.checkpointPath);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
-    this.load(startBlock);
+    this.load(options.startBlock);
   }
 
   load(startBlock?: number) {
     let hasCheckpoint = false;
 
-    if (fs.existsSync(CHECKPOINT_PATH)) {
+    if (fs.existsSync(this.checkpointPath)) {
       try {
-        const data = fs.readFileSync(CHECKPOINT_PATH, "utf-8");
+        const data = fs.readFileSync(this.checkpointPath, "utf-8");
         this.checkpoint = JSON.parse(data);
         hasCheckpoint = true;
       } catch (e) {
@@ -39,9 +50,9 @@ export class StateManager {
       this.checkpoint.lastProcessedBlock = startBlock - 1;
     }
 
-    if (fs.existsSync(SEEN_EVENTS_PATH)) {
+    if (fs.existsSync(this.seenEventsPath)) {
       try {
-        const data = fs.readFileSync(SEEN_EVENTS_PATH, "utf-8");
+        const data = fs.readFileSync(this.seenEventsPath, "utf-8");
         const list = JSON.parse(data);
         if (Array.isArray(list)) {
           this.seenEvents = new Set(list);
@@ -53,13 +64,13 @@ export class StateManager {
   }
 
   save() {
-    const tmpCheckpoint = CHECKPOINT_PATH + ".tmp";
+    const tmpCheckpoint = this.checkpointPath + ".tmp";
     fs.writeFileSync(tmpCheckpoint, JSON.stringify(this.checkpoint, null, 2), "utf-8");
-    fs.renameSync(tmpCheckpoint, CHECKPOINT_PATH);
+    fs.renameSync(tmpCheckpoint, this.checkpointPath);
 
-    const tmpSeen = SEEN_EVENTS_PATH + ".tmp";
+    const tmpSeen = this.seenEventsPath + ".tmp";
     fs.writeFileSync(tmpSeen, JSON.stringify(Array.from(this.seenEvents), null, 2), "utf-8");
-    fs.renameSync(tmpSeen, SEEN_EVENTS_PATH);
+    fs.renameSync(tmpSeen, this.seenEventsPath);
   }
 
   /**
