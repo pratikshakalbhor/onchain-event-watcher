@@ -50,6 +50,12 @@ The watcher runs against Ethereum Mainnet and monitors USDC Transfer events usin
 
 ![Live watcher](screenshots/watcher-running.png)
 
+### Real USDC Transfer Alerts
+
+The watcher successfully detects real `Transfer` events and generates a deterministic event ID using `transactionHash:logIndex` to prevent duplicate alerts.
+
+![USDC Transfer Alert](screenshots/transfer-alert.png)
+
 
 ## 🚀 Setup & Execution
 
